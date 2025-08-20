@@ -1,8 +1,8 @@
 package main
 
 import (
-	"math/rand"
 	"os"
+	"poc-log/handlers"
 
 	"github.com/gin-gonic/gin"
 	"go.uber.org/zap"
@@ -41,15 +41,17 @@ func getGCPEncoderConfig() zapcore.EncoderConfig {
 }
 
 func main() {
-	// Configure Zap logger with GCP-compatible format
-	config := getGCPEncoderConfig()
-	core := zapcore.NewCore(
-		zapcore.NewJSONEncoder(config),
-		zapcore.AddSync(os.Stdout),
-		zapcore.InfoLevel,
-	)
-	logger := zap.New(core)
-	defer logger.Sync()
+	// Initialize Zap logger
+	zapProductionConfig := zap.NewProductionConfig()
+
+	//  add getGCPEncoderConfig
+	zapProductionConfig.EncoderConfig = getGCPEncoderConfig()
+
+	zapProductionLogger, _ := zapProductionConfig.Build()
+
+	zap.ReplaceGlobals(zapProductionLogger)
+
+	defer zapProductionLogger.Sync()
 
 	// Gin router without default logger (since you use zap)
 	r := gin.New()
@@ -58,46 +60,18 @@ func main() {
 	// Optional: custom middleware to log each request with zap
 	r.Use(func(c *gin.Context) {
 		c.Next()
-		logger.Info("request completed",
-			zap.Int("status", c.Writer.Status()),
-			zap.String("method", c.Request.Method),
-			zap.String("path", c.Request.URL.Path),
-		)
+
+		zap.S().With(
+			"status", c.Writer.Status(),
+			"method", c.Request.Method,
+			"path", c.Request.URL.Path,
+		).Info("request completed")
 	})
 
 	// Define a simple GET endpoint
-	r.GET("/test-log", func(c *gin.Context) {
-		logger.Info("Test info",
-			zap.Int("id", 1),
-		)
+	r.GET("/test-log", handlers.TestLog)
 
-		logger.Warn("Test warn",
-			zap.Int("id", 1),
-		)
-
-		logger.Error("Test error",
-			zap.Int("id", 2),
-		)
-
-		logger.Info("Test info with random number",
-			zap.Int("randomNo", rand.Intn(100)),
-		)
-
-		c.JSON(200, gin.H{
-			"message": "Hello, World!",
-		})
-	})
-
-	r.POST("/test-body-log", func(c *gin.Context) {
-		var body map[string]interface{}
-		if err := c.ShouldBindJSON(&body); err != nil {
-			logger.Error("Failed to bind JSON", zap.Error(err))
-			c.JSON(400, gin.H{"error": "Invalid request body"})
-			return
-		}
-
-		c.JSON(200, gin.H{"message": "Request body logged"})
-	})
+	r.POST("/test-body-log", handlers.TestBodyLog)
 	// Start the server
 	port := os.Getenv("PORT")
 	if port == "" {
